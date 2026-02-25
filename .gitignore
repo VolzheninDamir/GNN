@@ -1,0 +1,23 @@
+# Данные (самое важное)
+raw/
+processed/
+*.pt
+*.inc
+*.SMSPEC
+*.UNRST
+*.UNSMRY
+*.grdecl
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.env
+
+# Jupyter Notebooks
+.ipynb_checkpoints
+
+# Логи и временные файлы
+*.log
+params.yaml  # если там секретные пути к твоей машине

@@ -1,0 +1,32 @@
+experiment_name: 'test_exp'
+
+preprocess:
+  load_full_grid: True # Make all cells ACTIVE if True and make ACTIVE only cells with NTG == 1 if False   
+  use_labels: True # construct graph with labels of NTG prop 
+  static_features: ['NTG', 'PORO', 'PERMX', 'PERMY', 'PERMZ', 'COHESION'] # List of features to be used
+  dynamic_features: ['SWAT', 'SOIL', 'SGAS'] # List of features to be used
+  scaler_type: 'stand' # ['stand', 'norm', None] - type of preprocessing (standardization or min-max scaling)
+  max_workers: 16 # Number of parallel workers for preprocessing
+  multiply_features: False # Whether to multiply all features 
+
+model:
+  nz: 100 # Number of channels in hidden layers
+  gamma: 1.0 # Size of hidden layers
+
+train:
+  train_size: 0.6 # Proportion of data used for training
+  batch_size: 16 # Number of samples per training batch
+  epochs: 50 # Number of training epochs
+  warmup_learning_rate: 0.0001 # Learning rate for optimizer
+  sigma_learning_rate: 0.0001
+  weight_decay: 0.0001
+  seed: 42 # Random seed for reproducibility
+  log_every: 10 # Log training progress every n batches
+  validate_every: 10 # Log validation score every n loged intervals
+  patience: 10 # Early stopping patience
+
+paths:
+  raw_data: C:/Users/Damir/Desktop/GNN_dataset_test/GNN_dataset_test/raw
+  processed_data: C:/Users/Damir/Desktop/GNN_dataset_test/GNN_dataset_test/processed
+  models: models
+  checkpoints: checkpoints
