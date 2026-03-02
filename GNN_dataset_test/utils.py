@@ -414,6 +414,450 @@ def set_seed(seed: int):
     np.random.seed(seed)
     torch.manual_seed(seed)
 
+import os
+import random
+import numpy as np
+import torch
+from torch.utils.data import Dataset
+from torch_geometric.loader import DataLoader
+from sklearn.model_selection import train_test_split
+import pandas as pd
+import glob
+
+# Предполагается, что функция set_seed определена выше
+def set_seed(seed):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+
+class III_stage_Dataset(Dataset):
+    """
+    Класс Dataset для загрузки графов из .pt файлов с возможностью нормализации:
+    - признаков ячеек (cell.x)
+    - целевой переменной скважин (well.y)
+    - атрибутов рёбер (edge_attr) для всех типов рёбер
+    """
+    def __init__(self,
+                 file_paths,
+                 scaler='norm',  # для cell.x ['norm', 'stand', None]
+                 global_min=None,
+                 global_max=None,
+                 global_mean=None,
+                 global_std=None,
+                 # Параметры для well.y
+                 y_scaler=None,      # если None, используется значение scaler
+                 y_global_min=None,
+                 y_global_max=None,
+                 y_global_mean=None,
+                 y_global_std=None,
+                 # Параметры для edge_attr
+                 edge_scaler=None,
+                 edge_global_min=None,
+                 edge_global_max=None,
+                 edge_global_mean=None,
+                 edge_global_std=None,
+                 ):
+        # Фильтруем пустые файлы
+        self.files = [f for f in file_paths if os.path.getsize(f) > 0]
+        self.eps = 1e-8
+
+        # Настройки для cell.x
+        self.scaler = scaler
+        self.global_min = global_min
+        self.global_max = global_max
+        self.global_mean = global_mean
+        self.global_std = global_std
+
+        # Настройки для well.y
+        self.y_scaler = y_scaler if y_scaler is not None else scaler
+        self.y_global_min = y_global_min
+        self.y_global_max = y_global_max
+        self.y_global_mean = y_global_mean
+        self.y_global_std = y_global_std
+
+        # Настройки для edge_attr
+        self.edge_scaler = edge_scaler if edge_scaler is not None else scaler
+        self.edge_global_min = edge_global_min
+        self.edge_global_max = edge_global_max
+        self.edge_global_mean = edge_global_mean
+        self.edge_global_std = edge_global_std
+
+        # Валидация для cell.x
+        if self.scaler == 'norm':
+            if self.global_min is not None and self.global_max is not None:
+                self._validate_normalization()
+            else:
+                raise AssertionError('Для cell.x не установлены min/max')
+        elif self.scaler == 'stand':
+            if self.global_mean is not None and self.global_std is not None:
+                self._validate_standardization()
+            else:
+                raise AssertionError('Для cell.x не установлены mean/std')
+
+        # Валидация для well.y
+        if self.y_scaler == 'norm':
+            if self.y_global_min is not None and self.y_global_max is not None:
+                self._validate_y_normalization()
+            else:
+                # Если нет статистик, просто не применяем нормализацию (или можно предупредить)
+                pass
+        elif self.y_scaler == 'stand':
+            if self.y_global_mean is not None and self.y_global_std is not None:
+                self._validate_y_standardization()
+            else:
+                pass
+
+        # Валидация для edge_attr
+        if self.edge_scaler == 'norm':
+            if self.edge_global_min is not None and self.edge_global_max is not None:
+                self._validate_edge_normalization()
+        elif self.edge_scaler == 'stand':
+            if self.edge_global_mean is not None and self.edge_global_std is not None:
+                self._validate_edge_standardization()
+
+    def _validate_normalization(self):
+        """Проверка размерности статистик для cell.x (min/max)."""
+        random_sample = self[random.randint(0, len(self.files)-1)][0]['cell']
+        feat_dim = random_sample.x.shape[1]
+        if self.global_min.shape[1] != feat_dim or self.global_min.shape[0] != 1:
+            raise AssertionError(f'global_min имеет размерность {self.global_min.shape}, ожидается (1, {feat_dim})')
+        if self.global_max.shape[1] != feat_dim or self.global_max.shape[0] != 1:
+            raise AssertionError(f'global_max имеет размерность {self.global_max.shape}, ожидается (1, {feat_dim})')
+
+    def _validate_standardization(self):
+        """Проверка размерности статистик для cell.x (mean/std)."""
+        random_sample = self[random.randint(0, len(self.files)-1)][0]['cell']
+        feat_dim = random_sample.x.shape[1]
+        if self.global_mean.shape[1] != feat_dim or self.global_mean.shape[0] != 1:
+            raise AssertionError(f'global_mean имеет размерность {self.global_mean.shape}, ожидается (1, {feat_dim})')
+        if self.global_std.shape[1] != feat_dim or self.global_std.shape[0] != 1:
+            raise AssertionError(f'global_std имеет размерность {self.global_std.shape}, ожидается (1, {feat_dim})')
+
+    def _validate_y_normalization(self):
+        """Проверка размерности статистик для well.y (min/max). Ожидается (1, 3, 1) или (1, 3)."""
+        random_sample = self[random.randint(0, len(self.files)-1)][0]
+        if 'well' not in random_sample.node_types or not hasattr(random_sample['well'], 'y'):
+            return
+        # Статистики должны транслироваться: можно хранить (1, 3, 1)
+        if self.y_global_min.dim() == 2:
+            # (1, 3) -> расширяем до (1, 3, 1)
+            self.y_global_min = self.y_global_min.unsqueeze(-1)
+            self.y_global_max = self.y_global_max.unsqueeze(-1)
+        if self.y_global_min.shape != (1, 3, 1):
+            raise AssertionError(f'y_global_min имеет размерность {self.y_global_min.shape}, ожидается (1, 3, 1)')
+
+    def _validate_y_standardization(self):
+        """Проверка размерности статистик для well.y (mean/std). Ожидается (1, 3, 1)."""
+        random_sample = self[random.randint(0, len(self.files)-1)][0]
+        if 'well' not in random_sample.node_types or not hasattr(random_sample['well'], 'y'):
+            return
+        if self.y_global_mean.dim() == 2:
+            self.y_global_mean = self.y_global_mean.unsqueeze(-1)
+            self.y_global_std = self.y_global_std.unsqueeze(-1)
+        if self.y_global_mean.shape != (1, 3, 1):
+            raise AssertionError(f'y_global_mean имеет размерность {self.y_global_mean.shape}, ожидается (1, 3, 1)')
+
+    def _validate_edge_normalization(self):
+        """Проверка размерности статистик для edge_attr (min/max). Ожидается (1, feat_dim)."""
+        random_sample = self[random.randint(0, len(self.files)-1)][0]
+        # Найдём первый тип рёбер с атрибутами
+        feat_dim = None
+        for edge_type in random_sample.edge_types:
+            if hasattr(random_sample[edge_type], 'edge_attr'):
+                edge_attr = random_sample[edge_type].edge_attr
+                if isinstance(edge_attr, np.ndarray):
+                    feat_dim = 1 if edge_attr.ndim == 1 else edge_attr.shape[1]
+                else:
+                    feat_dim = 1 if edge_attr.dim() == 1 else edge_attr.size(1)
+                break
+        if feat_dim is None:
+            return  # нет атрибутов рёбер
+        if self.edge_global_min is not None:
+            if self.edge_global_min.shape != (1, feat_dim):
+                raise AssertionError(f'edge_global_min имеет размерность {self.edge_global_min.shape}, ожидается (1, {feat_dim})')
+        if self.edge_global_max is not None:
+            if self.edge_global_max.shape != (1, feat_dim):
+                raise AssertionError(f'edge_global_max имеет размерность {self.edge_global_max.shape}, ожидается (1, {feat_dim})')
+
+    def _validate_edge_standardization(self):
+        """Проверка размерности статистик для edge_attr (mean/std). Ожидается (1, feat_dim)."""
+        random_sample = self[random.randint(0, len(self.files)-1)][0]
+        feat_dim = None
+        for edge_type in random_sample.edge_types:
+            if hasattr(random_sample[edge_type], 'edge_attr'):
+                edge_attr = random_sample[edge_type].edge_attr
+                if isinstance(edge_attr, np.ndarray):
+                    feat_dim = 1 if edge_attr.ndim == 1 else edge_attr.shape[1]
+                else:
+                    feat_dim = 1 if edge_attr.dim() == 1 else edge_attr.size(1)
+                break
+        if feat_dim is None:
+            return
+        if self.edge_global_mean is not None:
+            if self.edge_global_mean.shape != (1, feat_dim):
+                raise AssertionError(f'edge_global_mean имеет размерность {self.edge_global_mean.shape}, ожидается (1, {feat_dim})')
+        if self.edge_global_std is not None:
+            if self.edge_global_std.shape != (1, feat_dim):
+                raise AssertionError(f'edge_global_std имеет размерность {self.edge_global_std.shape}, ожидается (1, {feat_dim})')
+
+    def __len__(self):
+        return len(self.files)
+
+    def __getitem__(self, idx):
+        graph = torch.load(self.files[idx], weights_only=False)
+
+        # Замена NaN на 0 для признаков ячеек
+        if 'cell' in graph.node_types and hasattr(graph['cell'], 'x'):
+            graph['cell'].x = torch.nan_to_num(graph['cell'].x, nan=0.0)
+
+        # Замена NaN на 0 для целевой переменной скважин (если вдруг есть)
+        if 'well' in graph.node_types and hasattr(graph['well'], 'y'):
+            graph['well'].y = torch.nan_to_num(graph['well'].y, nan=0.0)
+
+        # Нормализация cell.x
+        if self.scaler == 'norm':
+            if self.global_min is not None and self.global_max is not None:
+                graph['cell'].x = ((graph['cell'].x - self.global_min) /
+                                   (self.global_max - self.global_min + self.eps))
+        elif self.scaler == 'stand':
+            if self.global_mean is not None and self.global_std is not None:
+                graph['cell'].x = ((graph['cell'].x - self.global_mean) /
+                                   (self.global_std + self.eps))
+
+        # Нормализация well.y (если существует)
+        if 'well' in graph.node_types and hasattr(graph['well'], 'y'):
+            if self.y_scaler == 'norm':
+                if self.y_global_min is not None and self.y_global_max is not None:
+                    graph['well'].y = ((graph['well'].y - self.y_global_min) /
+                                       (self.y_global_max - self.y_global_min + self.eps))
+            elif self.y_scaler == 'stand':
+                if self.y_global_mean is not None and self.y_global_std is not None:
+                    graph['well'].y = ((graph['well'].y - self.y_global_mean) /
+                                       (self.y_global_std + self.eps))
+
+        if torch.isnan(graph['well'].y).any():
+            print(f"ВНИМАНИЕ: well.y содержит NaN после нормализации в файле {self.files[idx]}")
+
+        # Нормализация атрибутов рёбер (для всех типов рёбер)
+        for edge_type in graph.edge_types:
+            edge_attr = graph[edge_type].get('edge_attr', None)
+            if edge_attr is not None:
+                # Преобразуем numpy в тензор, если необходимо
+                if isinstance(edge_attr, np.ndarray):
+                    edge_attr = torch.from_numpy(edge_attr).float()
+                    graph[edge_type].edge_attr = edge_attr
+                # Замена NaN на 0
+                edge_attr = torch.nan_to_num(edge_attr, nan=0.0)
+                # Нормализация
+                if self.edge_scaler == 'norm':
+                    if self.edge_global_min is not None and self.edge_global_max is not None:
+                        graph[edge_type].edge_attr = ((edge_attr - self.edge_global_min) /
+                                                       (self.edge_global_max - self.edge_global_min + self.eps))
+                elif self.edge_scaler == 'stand':
+                    if self.edge_global_mean is not None and self.edge_global_std is not None:
+                        graph[edge_type].edge_attr = ((edge_attr - self.edge_global_mean) /
+                                                       (self.edge_global_std + self.eps))
+
+        sample_name = os.path.basename(os.path.normpath(self.files[idx]))
+        return graph, sample_name
+
+
+def compute_y_stats(file_paths, scaler_type):
+    """
+    Вычисляет глобальные статистики для well.y по всем файлам.
+    Возвращает кортеж (min, max, mean, std) в виде тензоров (1, 3, 1) или None.
+    """
+    all_y = []
+    for path in file_paths:
+        data = torch.load(path, weights_only=False)
+        if 'well' in data.node_types and hasattr(data['well'], 'y'):
+            all_y.append(data['well'].y)  # каждый имеет форму (n_wells, 3, 25)
+    if not all_y:
+        return None, None, None, None
+
+    # Объединяем все скважины по первому измерению
+    all_y = torch.cat(all_y, dim=0)  # (total_wells, 3, 25)
+
+    if scaler_type == 'norm':
+        # Минимум и максимум по скважинам и времени для каждой фазы
+        y_min = all_y.amin(dim=(0, 2), keepdim=True)  # (1, 3, 1)
+        y_max = all_y.amax(dim=(0, 2), keepdim=True)
+        return y_min, y_max, None, None
+    elif scaler_type == 'stand':
+        # Среднее и стандартное отклонение по скважинам и времени для каждой фазы
+        y_mean = all_y.mean(dim=(0, 2), keepdim=True)   # (1, 3, 1)
+        y_std = all_y.std(dim=(0, 2), keepdim=True) + 1e-8
+        return None, None, y_mean, y_std
+    else:
+        return None, None, None, None
+
+
+def compute_edge_stats(file_paths, scaler_type, edge_type=('cell', 'flows_to', 'cell')):
+    """
+    Вычисляет глобальные статистики для edge_attr указанного типа рёбер по всем файлам.
+    Возвращает кортеж (min, max, mean, std) в виде тензоров (1, feat_dim) или None.
+    По умолчанию ожидается, что edge_attr одномерный (feat_dim=1).
+    """
+    all_edge_attrs = []
+    for path in file_paths:
+        data = torch.load(path, weights_only=False)
+        if edge_type in data.edge_types and hasattr(data[edge_type], 'edge_attr'):
+            edge_attr = data[edge_type].edge_attr
+            # Преобразуем numpy в тензор, если нужно
+            if isinstance(edge_attr, np.ndarray):
+                edge_attr = torch.from_numpy(edge_attr).float()
+            all_edge_attrs.append(edge_attr)  # каждый имеет форму (E,) или (E, feat_dim)
+
+    if not all_edge_attrs:
+        return None, None, None, None
+
+    # Объединяем все рёбра по первому измерению
+    all_edge_attrs = torch.cat(all_edge_attrs, dim=0)  # (total_edges, feat_dim) или (total_edges,)
+
+    # Если одномерный, добавим размерность признака для единообразия
+    if all_edge_attrs.dim() == 1:
+        all_edge_attrs = all_edge_attrs.view(-1, 1)
+    feat_dim = all_edge_attrs.size(1)
+
+    if scaler_type == 'norm':
+        e_min = all_edge_attrs.amin(dim=0, keepdim=True)  # (1, feat_dim)
+        e_max = all_edge_attrs.amax(dim=0, keepdim=True)
+        return e_min, e_max, None, None
+    elif scaler_type == 'stand':
+        e_mean = all_edge_attrs.mean(dim=0, keepdim=True)   # (1, feat_dim)
+        e_std = all_edge_attrs.std(dim=0, keepdim=True) + 1e-8
+        return None, None, e_mean, e_std
+    else:
+        return None, None, None, None
+
+
+def load_graph_data(configs_paths, configs_preproc, configs_train, return_val=True):
+    """
+    Загружает данные, разделяет на train/val, вычисляет статистики нормализации
+    для cell.x (из metadata), для well.y и edge_attr (из самих файлов), создаёт DataLoader'ы.
+    """
+    set_seed(configs_train["seed"])
+
+    all_samples_paths = glob.glob(f"{os.path.join(configs_paths['processed_data'], 'samples')}/*")
+    train_samples_paths, val_samples_paths = train_test_split(
+        all_samples_paths,
+        test_size=1 - configs_train['train_size'],
+        random_state=configs_train['seed']
+    )
+
+    val_samples = list(map(os.path.basename, val_samples_paths))
+
+    # Чтение метаданных для cell.x
+    meta = pd.read_csv(os.path.join(configs_paths['processed_data'], 'metadata', 'metadata.csv'))
+    meta = meta[meta['STATUS'] == 'COMPLETE']
+    mask = ~meta['MODEL'].isin(val_samples)
+
+    print("Метаданные (train часть):")
+    print(meta[mask])
+
+    # Определяем список признаков (исключая NTG)
+    data_features = set(configs_preproc['static_features']).union(configs_preproc['dynamic_features']) - {'NTG'}
+    if len(data_features) == 0:
+        raise AssertionError("Нет признаков для обучения модели. Укажите хотя бы один признак в static_features или dynamic_features (кроме NTG).")
+    if configs_preproc['multiply_features']:
+        data_features = ['multed_features']
+
+    data_features_num = len(data_features)
+
+    # Статистики для cell.x (из метаданных)
+    mins = torch.empty((1, data_features_num))
+    maxs = torch.empty((1, data_features_num))
+    means = torch.empty((1, data_features_num))
+    stds = torch.empty((1, data_features_num))
+
+    mins[0, :] = torch.tensor(
+        np.array([np.fromstring(s.strip('[]'), sep=' ') for s in meta[mask]['MIN']]).min(axis=0),
+        dtype=torch.float32
+    )
+    maxs[0, :] = torch.tensor(
+        np.array([np.fromstring(s.strip('[]'), sep=' ') for s in meta[mask]['MAX']]).max(axis=0),
+        dtype=torch.float32
+    )
+
+    means_arr = np.array([np.fromstring(s.strip('[]'), sep=' ') for s in meta[mask]['MEAN']])
+    means[0, :] = torch.tensor(means_arr.mean(axis=0), dtype=torch.float32)
+    stds_arr = np.array([np.fromstring(s.strip('[]'), sep=' ') for s in meta[mask]['STD']])
+    std = np.sqrt((stds_arr**2 + (means_arr - means.numpy())**2).sum(axis=0) / len(means_arr))
+    stds[0, :] = torch.tensor(std, dtype=torch.float32)
+
+    # Статистики для well.y (только на тренировочной выборке)
+    y_min, y_max, y_mean, y_std = compute_y_stats(train_samples_paths, configs_preproc['scaler_type'])
+
+    # Статистики для edge_attr (только на тренировочной выборке)
+    e_min, e_max, e_mean, e_std = compute_edge_stats(train_samples_paths, configs_preproc['scaler_type'])
+
+    # Создание датасетов с передачей всех статистик
+    train_dataset = III_stage_Dataset(
+        train_samples_paths,
+        scaler=configs_preproc['scaler_type'],
+        global_min=mins,
+        global_max=maxs,
+        global_mean=means,
+        global_std=stds,
+        y_scaler=configs_preproc['scaler_type'],
+        y_global_min=y_min,
+        y_global_max=y_max,
+        y_global_mean=y_mean,
+        y_global_std=y_std,
+        edge_scaler=configs_preproc['scaler_type'],
+        edge_global_min=e_min,
+        edge_global_max=e_max,
+        edge_global_mean=e_mean,
+        edge_global_std=e_std
+    )
+
+    val_dataset = III_stage_Dataset(
+        val_samples_paths,
+        scaler=configs_preproc['scaler_type'],
+        global_min=mins,
+        global_max=maxs,
+        global_mean=means,
+        global_std=stds,
+        y_scaler=configs_preproc['scaler_type'],
+        y_global_min=y_min,
+        y_global_max=y_max,
+        y_global_mean=y_mean,
+        y_global_std=y_std,
+        edge_scaler=configs_preproc['scaler_type'],
+        edge_global_min=e_min,
+        edge_global_max=e_max,
+        edge_global_mean=e_mean,
+        edge_global_std=e_std
+    )
+
+    train_dataloader = DataLoader(train_dataset, batch_size=configs_train['batch_size'], shuffle=False)
+    val_dataloader = DataLoader(val_dataset, batch_size=configs_train['batch_size'], shuffle=False)
+
+    if return_val:
+        return train_dataloader, val_dataloader, list(data_features)
+    else:
+        dataset = III_stage_Dataset(
+            all_samples_paths,
+            scaler=configs_preproc['scaler_type'],
+            global_min=mins,
+            global_max=maxs,
+            global_mean=means,
+            global_std=stds,
+            y_scaler=configs_preproc['scaler_type'],
+            y_global_min=y_min,
+            y_global_max=y_max,
+            y_global_mean=y_mean,
+            y_global_std=y_std,
+            edge_scaler=configs_preproc['scaler_type'],
+            edge_global_min=e_min,
+            edge_global_max=e_max,
+            edge_global_mean=e_mean,
+            edge_global_std=e_std
+        )
+        dataloader = DataLoader(dataset, batch_size=configs_train['batch_size'], shuffle=False)
+        return dataloader, None, list(data_features)
+
+"""
 class III_stage_Dataset(Dataset):
     
     '''
@@ -546,3 +990,4 @@ def load_graph_data(configs_paths, configs_preproc, configs_train, return_val = 
         dataset = III_stage_Dataset(all_samples_paths, scaler = configs_preproc['scaler_type'], global_max=maxs, global_min = mins, global_mean=means, global_std = stds)
         dataloader = DataLoader(dataset, batch_size=configs_train['batch_size'], shuffle=False)
         return dataloader, None, data_features
+"""

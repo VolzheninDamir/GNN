@@ -43,7 +43,7 @@ def load_one_case(static_feature_names, dynamic_feature_names, load_full_grid, u
 
     node_features_list = set(static_feature_names).union(dynamic_feature_names) - {'NTG'}
 
-    edge_index, edge_index_local, edge_features, node_features, node_ladels = graph.get_graf_edges_fast(slices=(), return_tran=False, node_features_list=node_features_list, return_labels=use_labels)
+    edge_index, edge_index_local, edge_features, node_features, node_ladels = graph.get_graf_edges_fast(slices=(), return_tran=True, node_features_list=node_features_list, return_labels=use_labels)
 
     x = torch.tensor(np.expand_dims(np.prod(node_features, axis=1), 1) if multiply_features else node_features , dtype=torch.float32)                 # (N_nodes, 5)
     data['cell'].x = x
