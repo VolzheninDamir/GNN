@@ -507,13 +507,15 @@ class III_stage_Dataset(Dataset):
             else:
                 pass
 
-        # Валидация для edge_attr
+        # Валидация для edge_attr (аналогично)
         if self.edge_scaler == 'norm':
             if self.edge_global_min is not None and self.edge_global_max is not None:
-                self._validate_edge_normalization()
+                # self._validate_edge_normalization()   # закомментировать
+                pass
         elif self.edge_scaler == 'stand':
             if self.edge_global_mean is not None and self.edge_global_std is not None:
-                self._validate_edge_standardization()
+                # self._validate_edge_standardization() # закомментировать
+                pass
 
     def _validate_normalization(self):
         """Проверка размерности статистик для cell.x (min/max)."""
@@ -648,15 +650,19 @@ class III_stage_Dataset(Dataset):
                     graph[edge_type].edge_attr = edge_attr
                 # Замена NaN на 0
                 edge_attr = torch.nan_to_num(edge_attr, nan=0.0)
+                # Приводим к двумерному виду (E, feat_dim), если одномерный
+                if edge_attr.dim() == 1:
+                    edge_attr = edge_attr.view(-1, 1)
+                    graph[edge_type].edge_attr = edge_attr
                 # Нормализация
                 if self.edge_scaler == 'norm':
                     if self.edge_global_min is not None and self.edge_global_max is not None:
                         graph[edge_type].edge_attr = ((edge_attr - self.edge_global_min) /
-                                                       (self.edge_global_max - self.edge_global_min + self.eps))
+                                                    (self.edge_global_max - self.edge_global_min + self.eps))
                 elif self.edge_scaler == 'stand':
                     if self.edge_global_mean is not None and self.edge_global_std is not None:
                         graph[edge_type].edge_attr = ((edge_attr - self.edge_global_mean) /
-                                                       (self.edge_global_std + self.eps))
+                                                    (self.edge_global_std + self.eps))
 
         sample_name = os.path.basename(os.path.normpath(self.files[idx]))
         return graph, sample_name

@@ -2,9 +2,10 @@ import torch
 import yaml
 import os
 import matplotlib.pyplot as plt
+import numpy as np  # для определения размерности edge_attr
 from torch_geometric.loader import DataLoader
 
-# Импортируем твою модель и функции
+# Импортируем модель и функции
 from simple_model import SimpleHeteroGNN
 from utils import load_graph_data
 
@@ -17,7 +18,6 @@ def train_model():
     print(f"Работаем на: {device}")
 
     # 2. Загрузка данных через твою функцию
-    # Она сама сделает split, посчитает статистики и нормализует всё
     train_loader, val_loader, feat_list = load_graph_data(
         config['paths'], 
         config['preprocess'], 
@@ -25,15 +25,26 @@ def train_model():
     )
 
     # 3. Инициализация модели
-    # Берем один пример из базы, чтобы узнать размерности входных данных
     sample_data, _ = next(iter(train_loader))
-    
+
+    # Определяем размерность edge_attr для рёбер cell->cell
+    edge_dim = 1  # по умолчанию
+    if ('cell', 'flows_to', 'cell') in sample_data.edge_types:
+        edge_attr = sample_data['cell', 'flows_to', 'cell'].get('edge_attr', None)
+        if edge_attr is not None:
+            if isinstance(edge_attr, torch.Tensor):
+                edge_dim = edge_attr.size(1) if edge_attr.dim() == 2 else 1
+            elif isinstance(edge_attr, np.ndarray):
+                edge_dim = edge_attr.shape[1] if edge_attr.ndim == 2 else 1
+    print(f"Размерность edge_attr: {edge_dim}")
+
     model = SimpleHeteroGNN(
         cell_features=sample_data['cell'].x.size(1),
         well_features=sample_data['well'].x.size(1),
-        hidden_dim=config['model']['nz'], # используем nz из yaml
+        hidden_dim=config['model']['nz'],
         out_seq_len=25,
-        num_phases=3
+        num_phases=3,
+        edge_dim=edge_dim
     ).to(device)
 
     # 4. Настройка обучения
@@ -61,7 +72,6 @@ def train_model():
             
             pred = model(batch)
 
-            #добавлено новое
             if torch.isnan(batch['well'].y).any():
                 print("NaN в well.y!")
             if torch.isnan(batch['cell'].x).any():
@@ -69,13 +79,11 @@ def train_model():
             if torch.isnan(pred).any():
                 print("NaN в предсказании!")
 
-            #добавлено новое
+            # Статистика батча (опционально)
             print(f"Batch well.y: min={batch['well'].y.min():.3f}, max={batch['well'].y.max():.3f}, mean={batch['well'].y.mean():.3f}")
-            # ВАЖНО: твой Dataset уже нормализовал well.y, так что считаем лосс прямо так
-            loss = criterion(pred, batch['well'].y)
             
+            loss = criterion(pred, batch['well'].y)
             loss.backward()
-            #добавлено новое
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
             optimizer.step()
             total_train_loss += loss.item()
@@ -117,5 +125,4 @@ def train_model():
     plt.show()
 
 if __name__ == "__main__":
-    # Фикс для корректной работы multiprocessing в Windows
     train_model()

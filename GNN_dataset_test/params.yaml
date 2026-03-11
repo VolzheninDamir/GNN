@@ -9,13 +9,16 @@ preprocess:
   max_workers: 16 # Number of parallel workers for preprocessing
   multiply_features: False # Whether to multiply all features 
 
+  grid_features: ['GV', 'X', 'Y', 'Z', ] # List of features to be used (это минимальный набор, можем больше, но не меньше...)
+  edge_feature_list: ['TRAN'] # ['TRAN', 'DIST']
+
 model:
   nz: 100 # Number of channels in hidden layers
   gamma: 1.0 # Size of hidden layers
 
 train:
   train_size: 0.6 # Proportion of data used for training
-  batch_size: 3 # Number of samples per training batch
+  batch_size: 2 # Number of samples per training batch
   epochs: 50 # Number of training epochs
   warmup_learning_rate: 0.00001 # Learning rate for optimizer
   sigma_learning_rate: 0.0001
