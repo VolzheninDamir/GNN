@@ -1,4 +1,3 @@
-
 import os
 import numpy as np
 import pandas as pd
@@ -25,34 +24,51 @@ def prepare_grid_data(grdecl_folder, grid_names):
     return grid_data
 
 
-def load_one_case(static_feature_names, dynamic_feature_names, load_full_grid, use_labels, final_dir, rewrite_path, graph, multiply_features = False):
+def load_one_case(configs_preproc, final_dir, rewrite_path, graph):
+    model = os.path.basename(os.path.normpath(final_dir))
 
     summary = Summary.load(os.path.join(final_dir, "result.SMSPEC"), os.path.join(final_dir, "result.UNSMRY"))
 
     data = HeteroData()
     
     graph.update_graph_from_folder(
-                                os.path.join(final_dir, "props"),
-                                static_feature_names,
-                                os.path.join(final_dir, "result.UNRST"),
-                                dynamic_feature_names
-                                   )
-
-    if load_full_grid:
+                                    folder_with_properties = os.path.join(final_dir, "props"),
+                                    static_properties_names = configs_preproc['static_features'],
+                                    unrst_path = os.path.join(final_dir, "result.UNRST"),
+                                    dynamic_properties_names = configs_preproc['dynamic_features'], 
+                                    grid_properties_names = configs_preproc['grid_features'],
+                                )
+    if configs_preproc['load_full_grid']:
         graph.active = np.ones(shape=graph.active.shape)
 
-    node_features_list = set(static_feature_names).union(dynamic_feature_names) - {'NTG'}
+    node_features_list = set()
+    for prop_list in [configs_preproc['static_features'],
+                        configs_preproc['grid_features'],
+                        configs_preproc['dynamic_features'],]:
+        node_features_list = node_features_list.union(prop_list)
+        
 
-    edge_index, edge_index_local, edge_features, node_features, node_ladels = graph.get_graf_edges_fast(slices=(), return_tran=True, node_features_list=node_features_list, return_labels=use_labels)
+    node_features_list = sorted(list(node_features_list - (set(['NTG']) if configs_preproc['use_labels'] else set())))
 
-    x = torch.tensor(np.expand_dims(np.prod(node_features, axis=1), 1) if multiply_features else node_features , dtype=torch.float32)                 # (N_nodes, 5)
+    edge_index, edge_index_local, edge_features, node_features, node_ladels = graph.get_graf_edges_fast(slices=(),
+                                                                                                        edge_feature_list=configs_preproc['edge_feature_list'],
+                                                                                                        node_features_list=node_features_list,
+                                                                                                        return_labels=configs_preproc['use_labels'])
+
+    x = torch.tensor(np.expand_dims(np.prod(node_features, axis=1), 1) if configs_preproc['multiply_features'] else node_features , dtype=torch.float32)                 # (N_nodes, 5)
     data['cell'].x = x
 
-    edge_index = torch.tensor(edge_index.transpose(), dtype=torch.long)  # (2,E)
+    edge_index_tmp = edge_index.copy()
+    unique_nodes = np.unique(edge_index_tmp)   
+    mapping_arr = np.full(edge_index_tmp.max()+1, -1, dtype=int)
+    mapping_arr[unique_nodes] = np.arange(len(unique_nodes))
+    edge_index_local = mapping_arr[edge_index_tmp]
+
+    edge_index = torch.tensor(edge_index_local.transpose(), dtype=torch.long)  # (2,E)
     data['cell', 'flows_to', 'cell'].edge_index = edge_index.T
 
     data['cell', 'flows_to', 'cell'].edge_attr = edge_features
-
+    
     src_wells = []
     dst_cells = []
     wells_prod = []
@@ -73,22 +89,29 @@ def load_one_case(static_feature_names, dynamic_feature_names, load_full_grid, u
 
     data['well'].x = torch.zeros(len(wells_prod), 1)  # без признаков (или можно задать эмбеддинги)
 
-    edge_index_well_cell = torch.tensor([dst_cells, src_wells], dtype=torch.long)
+    dst_cells_local = mapping_arr[dst_cells]
+
+    edge_index_well_cell = torch.tensor([dst_cells_local, src_wells], dtype=torch.long)
     data['cell', 'linked_to', 'well'].edge_index = edge_index_well_cell
 
     data['well'].y = torch.tensor(np.array(wells_prod), dtype=torch.float32)
 
 
-    if use_labels:
+    if configs_preproc['use_labels']:
         data['cell'].labels = torch.tensor(node_ladels, dtype=torch.float32) # (N_nodes, 1)
+    else:
+        node_ladels = np.ones(x.shape[0])
 
-    model = os.path.basename(os.path.normpath(final_dir))
 
     print(model, 'Done!')
 
     torch.save(data, os.path.join(rewrite_path, f"{model}.pt"))
 
-    return {'MODEL':[model],'MIN':[np.nanmin(x[node_ladels == 1], axis=0)],'MAX':[np.nanmax(x[node_ladels == 1], axis=0)],'MEAN':[np.nanmean(x[node_ladels == 1], axis=0)],'STD':[np.nanstd(x[node_ladels == 1], axis=0)],}
+    return {'MODEL':[model], \
+            'MIN':[np.nanmin(x[node_ladels == 1], axis=0)], \
+            'MAX':[np.nanmax(x[node_ladels == 1], axis=0)], \
+            'MEAN':[np.nanmean(x[node_ladels == 1], axis=0)], \
+            'STD':[np.nanstd(x[node_ladels == 1], axis=0)],}
 
 def run(config_path: str):
 
@@ -113,14 +136,10 @@ def run(config_path: str):
 
         for _, row in metadata.iterrows():
             fut = exe.submit(load_one_case,
-                            configs_preproc['static_features'],
-                            configs_preproc['dynamic_features'],
-                            configs_preproc['load_full_grid'],
-                            configs_preproc['use_labels'],
+                            configs_preproc,
                             os.path.join(configs_paths['raw_data'], 'samples', row['MODEL']),
                             os.path.join(configs_paths['processed_data'], 'samples'),
                             grid_data[row['GRID']].copy(),
-                            configs_preproc['multiply_features']
                             )
             tasks.append(fut)
 

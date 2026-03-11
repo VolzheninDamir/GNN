@@ -3,7 +3,7 @@ experiment_name: 'test_exp'
 preprocess:
   load_full_grid: True # Make all cells ACTIVE if True and make ACTIVE only cells with NTG == 1 if False   
   use_labels: True # construct graph with labels of NTG prop 
-  static_features: ['NTG', 'PORO', 'PERMX', 'PERMY', 'PERMZ', 'COHESION'] # List of features to be used
+  static_features: ['NTG', 'PORO', 'PERMX', 'PERMY', 'PERMZ'] # List of features to be used (deleted 'COHESION')
   dynamic_features: ['SWAT', 'SOIL', 'SGAS'] # List of features to be used
   scaler_type: 'stand' # ['stand', 'norm', None] - type of preprocessing (standardization or min-max scaling)
   max_workers: 16 # Number of parallel workers for preprocessing
@@ -13,13 +13,15 @@ preprocess:
   edge_feature_list: ['TRAN'] # ['TRAN', 'DIST']
 
 model:
-  nz: 100 # Number of channels in hidden layers
+  nz: 128 # Number of channels in hidden layers
   gamma: 1.0 # Size of hidden layers
+  num_layers: 3 # количество блоков GNN+
+  dropout: 0.05
 
 train:
   train_size: 0.6 # Proportion of data used for training
   batch_size: 2 # Number of samples per training batch
-  epochs: 50 # Number of training epochs
+  epochs: 200 # Number of training epochs
   warmup_learning_rate: 0.00001 # Learning rate for optimizer
   sigma_learning_rate: 0.0001
   weight_decay: 0.0001
