@@ -217,13 +217,18 @@ class New_GeoData:
 
                         if props_count[ind_kw] == 0: # проверка, что ранее не брали это ключевое слово (вытаскиваем первый timestep)
 
-                            arr1 = list(arr.copy())
+                            """ arr1 = list(arr.copy())
 
                             for i in act: # сохраняем по активным ячейкам 
                                 if i == 0:
                                     tmp_props[ind_kw].append(np.nan)
                                 if i == 1:
-                                    tmp_props[ind_kw].append(arr1.pop(0))
+                                    tmp_props[ind_kw].append(arr1.pop(0)) """
+                            # Замени весь блок arr1 = list... и цикл for i in act: на 3 строчки:
+                            expanded_arr = np.full(len(act), np.nan)
+                            expanded_arr[act == 1] = arr
+                            tmp_props[ind_kw].append(expanded_arr)
+
                             tmp_props[ind_kw] = np.array(tmp_props[ind_kw])
                             props_count[ind_kw] += 1
 
@@ -500,8 +505,9 @@ class New_GeoData:
                 CDARCY = 0.00852702
 
                 edge_props['TRAN'] = CDARCY/(1/data_for_tran_calc[0] + 1/data_for_tran_calc[1]) #TRAN
-
+                #поменял местами эти нижние 2 строки
                 edge_props['TRAN'] *= fault_edges_unique
+                edge_props['TRAN'] = np.log1p(edge_props['TRAN'])                
 
             if 'DIST' in edge_feature_list:
                 cells_center = (self.pts_coord.min(axis=3) + self.pts_coord.max(axis=3)) / 2

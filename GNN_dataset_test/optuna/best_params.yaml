@@ -1,0 +1,20 @@
+conv_type: TransformerConv
+dropout: 0.1414014801440857
+heads: 3
+hidden_dim: 64
+lr: 0.0009636431693202418
+num_layers: 3
+weight_decay: 5.9901345729681186e-05
+
+
+model:
+  nz: 64               # hidden_dim
+  num_layers: 3
+  dropout: 0.1414
+  heads: 3             # если вы хотите явно указать heads в модели (в текущей модели heads=3 по умолчанию)
+  conv_type: TransformerConv  # если вы расширите модель для выбора типа слоя
+train:
+  warmup_learning_rate: 0.000964
+  weight_decay: 5.99e-05
+  epochs: 100
+  patience: 20

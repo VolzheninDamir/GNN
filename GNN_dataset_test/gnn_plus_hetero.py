@@ -1,19 +1,20 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch_geometric.nn import GATConv, HeteroConv, Linear
+from torch_geometric.nn import GATv2Conv, HeteroConv, Linear
 
 class GNNPlusLayer(nn.Module):
     """
     Один блок архитектуры GNN+:
-    - Message Passing (GATConv с признаками рёбер)
+    - Message Passing (GATv2Conv с признаками рёбер)
     - Pre‑norm, Dropout, Residual
     - FFN (MLP) с Pre‑norm и Residual
     """
     def __init__(self, hidden_dim, dropout=0.1):
         super().__init__()
-        self.msg = GATConv(hidden_dim, hidden_dim, heads=1, concat=False,
-                           edge_dim=hidden_dim, add_self_loops=False)
+        # Используем GATv2Conv вместо GATConv
+        self.msg = GATv2Conv(hidden_dim, hidden_dim, heads=3, concat=False,
+                             edge_dim=hidden_dim, add_self_loops=False)
         self.norm1 = nn.LayerNorm(hidden_dim)
         self.dropout = nn.Dropout(dropout)
 
@@ -48,10 +49,10 @@ class GNNPlusHetero(nn.Module):
     def __init__(self,
                  cell_features,
                  well_features,
-                 hidden_dim=128,
-                 out_seq_len=25,
+                 hidden_dim=96,
+                 out_seq_len=24,
                  num_phases=3,
-                 edge_dim=1,
+                 edge_dim=2,
                  num_layers=3,
                  dropout=0.1):
         super().__init__()
@@ -68,9 +69,9 @@ class GNNPlusHetero(nn.Module):
 
         # 3. Слой для связи ячейка → скважина (без атрибутов рёбер)
         self.well_conv = HeteroConv({
-            ('cell', 'linked_to', 'well'): GATConv(hidden_dim, hidden_dim,
-                                                    heads=1, concat=False,
-                                                    add_self_loops=False)
+            ('cell', 'linked_to', 'well'): GATv2Conv(hidden_dim, hidden_dim,
+                                                     heads=3, concat=False,
+                                                     add_self_loops=False)
         }, aggr='mean')
 
         # 4. Финальный MLP для скважин
@@ -105,4 +106,4 @@ class GNNPlusHetero(nn.Module):
 
         # Финальный прогноз
         out = self.well_mlp(h_well)
-        return out.view(-1, 3, 25)
+        return out.view(-1, 3, 24)

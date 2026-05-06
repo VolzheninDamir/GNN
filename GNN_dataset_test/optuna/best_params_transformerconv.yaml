@@ -1,0 +1,6 @@
+dropout: 0.1
+heads: 2
+hidden_dim: 64
+lr: 1.7548341229159283e-05
+num_layers: 3
+weight_decay: 9.49706890687098e-06

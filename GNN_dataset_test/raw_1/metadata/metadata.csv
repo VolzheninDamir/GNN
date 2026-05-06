@@ -1,0 +1,11 @@
+Id;Path;Status;MODEL;GRID
+1;A001/e1_v00001;Not calculated;e1_v00001;e1_v00001.grdecl
+2;A001/e1_v00002;Not calculated;e1_v00002;e1_v00002.grdecl
+3;A001/e1_v00003;Not calculated;e1_v00003;e1_v00003.grdecl
+4;A001/e1_v00004;Not calculated;e1_v00004;e1_v00001.grdecl
+5;A001/e1_v00005;Not calculated;e1_v00005;e1_v00002.grdecl
+6;A001/e1_v00006;Not calculated;e1_v00006;e1_v00003.grdecl
+7;A001/e1_v00007;Not calculated;e1_v00007;e1_v00001.grdecl
+8;A001/e1_v00008;Not calculated;e1_v00008;e1_v00002.grdecl
+9;A001/e1_v00009;Not calculated;e1_v00009;e1_v00003.grdecl
+10;A001/e1_v00010;Not calculated;e1_v00010;e1_v00001.grdecl

@@ -9,26 +9,53 @@ preprocess:
   max_workers: 16 # Number of parallel workers for preprocessing
   multiply_features: False # Whether to multiply all features 
 
+  #process_batch_size: 50
+  #processed_batch_num: -1
+  #grid_features: ['GV', 'X', 'Y', 'Z', 'DX', 'DY', 'DZ', 'I', 'J'] # List of features to be used
+  #export_features: ['NTG', 'PORO', 'PERMX', 'PERMY', 'PERMZ', 'SWAT', 'SOIL', 'SGAS', 'X', 'Y', 'Z'] # (это минимальный набор, можем больше, но не меньше...)
+  #export_edge_features: ['TRAN'] # (это минимальный набор, можем больше, но не меньше...)
+  
+  #fault_tran_list: [0.2]
+  #kvkh: [0.1] # 'None' or list
+
+  #PVT:
+    #RHO_OIL   : 799.0    # плотность нефти,  кг/м³
+    #RHO_GAS   : 150.0    # плотность газа,   кг/м³
+    #RHO_WATER : 1050.0   # плотность воды,   кг/м³
+    #P_OWC_BAR : 259.0    # давление на ВНК,  бар (опорная точка)
+    #G         : 9.80665  # ускорение св. пад., м/с²
+    #BO_STATIC : 1.893469 # rm³/sm³
+    #BG_STATIC : 0.026364 # rm³/sm³
+    #BW_STATIC : 1.046    # rm³/sm³
+    #WAT_VISC  : 0.305    # cP
+    #OIL_VISC  : 1.0      # cP
+
+  #SWCR: # Зависимость Swcr от пористости: Swl = a*PORO + b, Swcr = Swl + offset
+    #SWL_A       : -1.053
+    #SWL_B       :  0.4081
+    #SWCR_OFFSET :  0.1"""
+
   grid_features: ['GV', 'X', 'Y', 'Z', ] # List of features to be used (это минимальный набор, можем больше, но не меньше...)
-  edge_feature_list: ['TRAN'] # ['TRAN', 'DIST']
+  edge_feature_list: ['TRAN', 'DIST'] # ['TRAN', 'DIST']
 
 model:
-  nz: 128 # Number of channels in hidden layers
+  nz: 96 # Number of channels in hidden layers
   gamma: 1.0 # Size of hidden layers
   num_layers: 3 # количество блоков GNN+
-  dropout: 0.05
+  dropout: 0.1
+  ffn_expansion: 4      # коэффициент расширения FFN (новый параметр)
 
 train:
   train_size: 0.6 # Proportion of data used for training
   batch_size: 2 # Number of samples per training batch
-  epochs: 200 # Number of training epochs
-  warmup_learning_rate: 0.00001 # Learning rate for optimizer
+  epochs: 192 # Number of training epochs
+  warmup_learning_rate: 1.4783435802415027e-05 # Learning rate for optimizer
   sigma_learning_rate: 0.0001
-  weight_decay: 0.0001
+  weight_decay: 7.4234647448618435e-06
   seed: 42 # Random seed for reproducibility
   log_every: 10 # Log training progress every n batches
   validate_every: 10 # Log validation score every n loged intervals
-  patience: 10 # Early stopping patience
+  patience: 4 # Early stopping patience
 
 paths:
   raw_data: C:/Users/Damir/Desktop/GNN_dataset_test/GNN_dataset_test/raw

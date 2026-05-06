@@ -38,6 +38,14 @@ def load_one_case(configs_preproc, final_dir, rewrite_path, graph):
                                     dynamic_properties_names = configs_preproc['dynamic_features'], 
                                     grid_properties_names = configs_preproc['grid_features'],
                                 )
+    """ # ========== НОВЫЙ КОД ==========
+    # Логарифмирование проницаемости ячеек (PERMX, PERMY, PERMZ)
+    for perm in ['PERMX', 'PERMY', 'PERMZ']:
+        if perm in graph.props:
+            # Применяем log1p (логарифм от (x+1)) для избежания log(0)
+            graph.props[perm] = np.log1p(graph.props[perm])
+    # ================================ """
+    
     if configs_preproc['load_full_grid']:
         graph.active = np.ones(shape=graph.active.shape)
 
@@ -54,6 +62,21 @@ def load_one_case(configs_preproc, final_dir, rewrite_path, graph):
                                                                                                         edge_feature_list=configs_preproc['edge_feature_list'],
                                                                                                         node_features_list=node_features_list,
                                                                                                         return_labels=configs_preproc['use_labels'])
+    # Вызываем функцию (она посчитает TRAN по честным линейным проницаемостям)
+    edge_index, edge_index_local, edge_features, node_features, node_ladels = graph.get_graf_edges_fast(
+        slices=(),
+        edge_feature_list=configs_preproc['edge_feature_list'],
+        node_features_list=node_features_list,
+        return_labels=configs_preproc['use_labels']
+    )
+
+    # --- ПРАВИЛЬНОЕ ЛОГАРИФМИРОВАНИЕ ---
+    # Логарифмируем проницаемость ТОЛЬКО в признаках для нейросети
+    for perm in['PERMX', 'PERMY', 'PERMZ']:
+        if perm in node_features_list:
+            idx = node_features_list.index(perm)
+            node_features[:, idx] = np.log1p(node_features[:, idx])
+    # -----------------------------------
 
     x = torch.tensor(np.expand_dims(np.prod(node_features, axis=1), 1) if configs_preproc['multiply_features'] else node_features , dtype=torch.float32)                 # (N_nodes, 5)
     data['cell'].x = x
@@ -91,10 +114,19 @@ def load_one_case(configs_preproc, final_dir, rewrite_path, graph):
 
     dst_cells_local = mapping_arr[dst_cells]
 
+    # --- Фильтрация некорректных индексов (-1) ---
+    valid_mask = dst_cells_local != -1
+    dst_cells_local = dst_cells_local[valid_mask]
+    src_wells = np.array(src_wells)[valid_mask].tolist()
+    # --------------------------------------------
+
     edge_index_well_cell = torch.tensor([dst_cells_local, src_wells], dtype=torch.long)
     data['cell', 'linked_to', 'well'].edge_index = edge_index_well_cell
 
-    data['well'].y = torch.tensor(np.array(wells_prod), dtype=torch.float32)
+    wells_prod = np.array(wells_prod)  # (количество_скважин, 3, 25)
+    wells_prod = wells_prod[:, :, 1:]   # убираем первый шаг, теперь (..., 3, 24)
+    wells_prod_log = np.log1p(wells_prod)
+    data['well'].y = torch.tensor(np.array(wells_prod_log), dtype=torch.float32)
 
 
     if configs_preproc['use_labels']:
